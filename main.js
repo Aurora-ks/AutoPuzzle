@@ -397,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 核心算法逻辑 ---
 
-    // 2. 求解器入口
+    // 求解器入口
     async function runSolver() {
         // 禁用按钮并显示加载状态
         solveButton.disabled = true;
@@ -410,20 +410,26 @@ document.addEventListener('DOMContentLoaded', () => {
             return parseInt(document.getElementById(`piece-count-${p.id}`).value) || 0;
         });
 
-        const solution = solve(gridState, pieceCounts);
+        // 获取方块8必须使用的选项
+        const requirePiece8 = document.getElementById('require-piece8').checked;
+
+        const solution = solve(gridState, pieceCounts, requirePiece8);
 
         if (solution) {
             displaySolution(solution);
             messageArea.innerHTML = '<p class="text-lg font-bold text-green-600">成功找到解决方案！</p>';
         } else {
-            messageArea.innerHTML = '<p class="text-lg font-bold text-red-600">无法实现！没有找到可行的填充方案。</p>';
+            const errorMsg = requirePiece8 ?
+                '无法实现！没有找到包含方块8的可行填充方案。' :
+                '无法实现！没有找到可行的填充方案。';
+            messageArea.innerHTML = `<p class="text-lg font-bold text-red-600">${errorMsg}</p>`;
         }
         solveButton.disabled = false;
         solveButton.innerHTML = '开始搜索';
     }
 
-    // 3. 递归回溯函数
-    function solve(board, counts) {
+    // 递归回溯函数
+    function solve(board, counts, requirePiece8 = false) {
         const findEmpty = () => {
             for (let r = 0; r < GRID_ROWS; r++) {
                 for (let c = 0; c < GRID_COLS; c++) {
@@ -435,6 +441,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const emptyCell = findEmpty();
         if (!emptyCell) {
+            // 找到解，检查方块8约束
+            if (requirePiece8) {
+                // 检查解决方案中是否包含方块8
+                const hasPiece8 = checkBoardContainsPiece8(board);
+                if (!hasPiece8) {
+                    return null; // 不满足方块8约束，继续搜索
+                }
+            }
             return board; // 找到解
         }
 
@@ -462,7 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         newCounts[piece.id - 1]--;
 
                         // 递归
-                        const result = solve(newBoard, newCounts);
+                        const result = solve(newBoard, newCounts, requirePiece8);
                         if (result) {
                             return result; // 成功，返回结果
                         }
@@ -474,7 +488,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return null; // 所有尝试都失败了
     }
 
-    // 4. 辅助函数
+    // 辅助函数
+    function checkBoardContainsPiece8(board) {
+        // 检查棋盘中是否包含方块8（十字形）
+        for (let r = 0; r < GRID_ROWS; r++) {
+            for (let c = 0; c < GRID_COLS; c++) {
+                if (board[r][c] === 8) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     function canPlace(board, shape, r, c) {
         for (const [dr, dc] of shape) {
             const nr = r + dr;
