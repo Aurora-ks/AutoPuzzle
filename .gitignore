@@ -1,0 +1,7 @@
+.vs/
+.lingma/
+.cursor/
+
+out/
+
+vcpkg_installed/
