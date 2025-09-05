@@ -12,7 +12,7 @@ find_package(OpenCV REQUIRED)
 
 # 包含OpenCV头文件目录
 include_directories(${OpenCV_INCLUDE_DIRS})
-add_executable (ProjectSnow "main.cpp"  "src/ScreenCapture.cpp")
+add_executable (ProjectSnow "main.cpp"  "src/ScreenCapture.cpp" "src/recognition.cpp" "src/utils.cpp")
 
 # target_compile_definitions(ProjectSnow PRIVATE UNICODE _UNICODE)
 

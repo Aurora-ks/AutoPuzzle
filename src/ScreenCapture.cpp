@@ -1,4 +1,5 @@
 #include "ScreenCapture.h"
+#include "utils.h"
 #include <windows.h>
 #include <iostream>
 
@@ -8,7 +9,7 @@
  * @param frame 输出的帧图像
  * @return 是否成功捕获
  */
-bool ScreenCapture::CaptureGameWindow(const std::string& windowName, cv::Mat& frame) {
+bool CaptureGameWindow(const std::string& windowName, cv::Mat& frame) {
     // 查找窗口句柄
     HWND hwnd = FindWindow(nullptr, windowName.c_str());
     if (hwnd == nullptr) {
@@ -32,7 +33,7 @@ bool ScreenCapture::CaptureGameWindow(const std::string& windowName, cv::Mat& fr
  * 使用PrintWindow API捕获完整的窗口内容，包括所有子窗口和自定义绘制的内容。
  * 如果PrintWindow不可用或失败，将回退到BitBlt方法。
  */
-bool ScreenCapture::CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
+bool CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
     HWND hWnd = reinterpret_cast<HWND>(hwnd);
     
     // 检查窗口句柄有效性
@@ -63,7 +64,7 @@ bool ScreenCapture::CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
     }
     
     // 创建设备上下文
-    HDC hScreenDC = GetDC(nullptr);
+    HDC hScreenDC = GetDC(hWnd);
     if (hScreenDC == nullptr) {
         std::cerr << "Error: Cannot get screen device context" << std::endl;
         return false;
@@ -92,9 +93,9 @@ bool ScreenCapture::CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
         std::cerr << "Error: Cannot select bitmap into memory DC" << std::endl;
         return false;
     }
-    
+
     // 使用PrintWindow捕获完整窗口（包括子窗口）
-    BOOL printResult = PrintWindow(hWnd, hMemoryDC, PW_RENDERFULLCONTENT);
+    BOOL printResult = PrintWindow(hWnd, hMemoryDC, PW_CLIENTONLY);
     
     // 如果PrintWindow失败，回退到BitBlt方法
     if (!printResult) {
@@ -114,29 +115,65 @@ bool ScreenCapture::CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
         }
     }
     
-    // 获取位图信息
+    // 第一次查询：获取实际位深（biBitCount）等信息
     BITMAPINFO bmi = {0};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;  // 负值表示top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
-    
-    // 分配内存存储像素数据
-    cv::Mat rawImage(height, width, CV_8UC4);
+    if (!GetDIBits(hScreenDC, hBitmap, 0, 0, nullptr, &bmi, DIB_RGB_COLORS)) {
+        SelectObject(hMemoryDC, hOldBitmap);
+        DeleteObject(hBitmap);
+        DeleteDC(hMemoryDC);
+        ReleaseDC(nullptr, hScreenDC);
+        std::cerr << "Error: Query GetDIBits failed" << std::endl;
+        return false;
+    }
+
+    WORD bitCount = bmi.bmiHeader.biBitCount;
+    if (bitCount == 0) {
+        bitCount = 32; // 兜底为 32 位
+    }
+    int channels = bitCount == 1 ? 1 : static_cast<int>(bitCount) / 8; // 常见：8/24/32
+    if (channels != 1 && channels != 3 && channels != 4) {
+        channels = 4; // 非预期位深时兜底到 4 通道
+    }
+
+    // 设置为 top-down 并使用实际位深
+    ZeroMemory(&bmi, sizeof(BITMAPINFO));
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height; // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = static_cast<WORD>(channels * 8);
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    cv::Mat rawImage;
+    if (channels == 4) {
+        rawImage.create(height, width, CV_8UC4);
+    } else if (channels == 3) {
+        rawImage.create(height, width, CV_8UC3);
+    } else {
+        rawImage.create(height, width, CV_8UC1);
+    }
+
     if (!GetDIBits(hScreenDC, hBitmap, 0, height, rawImage.data, &bmi, DIB_RGB_COLORS)) {
         SelectObject(hMemoryDC, hOldBitmap);
         DeleteObject(hBitmap);
         DeleteDC(hMemoryDC);
         ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot get bitmap data" << std::endl;
+        std::cerr << "Error: Cannot get bitmap data via GetDIBits" << std::endl;
         return false;
     }
-    
-    // 转换为OpenCV格式 (BGRA to BGR)
-    cv::cvtColor(rawImage, frame, cv::COLOR_BGRA2BGR);
-    
+
+    // 统一输出为 BGR
+    if (channels == 4) {
+        cv::cvtColor(rawImage, frame, cv::COLOR_BGRA2BGR);
+    } else if (channels == 3) {
+        frame = rawImage.clone();
+    } else {
+        cv::cvtColor(rawImage, frame, cv::COLOR_GRAY2BGR);
+    }
+    saveImage(frame, "screen_shot.png", "./screen");
+
     // 清理资源
     SelectObject(hMemoryDC, hOldBitmap);
     DeleteObject(hBitmap);
@@ -155,7 +192,7 @@ bool ScreenCapture::CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
  * @param frame 输出的帧图像
  * @return 是否成功捕获
  */
-bool ScreenCapture::CaptureScreenRegion(int x, int y, int width, int height, cv::Mat& frame) {
+bool CaptureScreenRegion(int x, int y, int width, int height, cv::Mat& frame) {
     // 参数验证
     if (width <= 0 || height <= 0) {
         std::cerr << "Error: Invalid capture region size: " << width << "x" << height << std::endl;
@@ -237,7 +274,7 @@ bool ScreenCapture::CaptureScreenRegion(int x, int y, int width, int height, cv:
  * @param height 屏幕高度（输出参数）
  * @return 是否成功获取
  */
-bool ScreenCapture::GetScreenSize(int& width, int& height) {
+bool GetScreenSize(int& width, int& height) {
     width = GetSystemMetrics(SM_CXSCREEN);
     height = GetSystemMetrics(SM_CYSCREEN);
     
@@ -247,30 +284,4 @@ bool ScreenCapture::GetScreenSize(int& width, int& height) {
     }
     
     return true;
-}
-
-/**
- * @brief 将cv::Mat保存为图片文件
- * @param frame 要保存的图像
- * @param filename 保存的文件名
- * @return 是否保存成功
- */
-bool ScreenCapture::SaveFrameAsImage(const cv::Mat& frame, const std::string& filename) {
-    if (frame.empty()) {
-        std::cerr << "Error: Frame is empty, cannot save to " << filename << std::endl;
-        return false;
-    }
-    
-    try {
-        bool result = cv::imwrite(filename, frame);
-        if (result) {
-            std::cout << "Frame successfully saved to " << filename << std::endl;
-        } else {
-            std::cerr << "Error: Failed to save frame to " << filename << std::endl;
-        }
-        return result;
-    } catch (const cv::Exception& ex) {
-        std::cerr << "Exception saving frame: " << ex.what() << std::endl;
-        return false;
-    }
 }
