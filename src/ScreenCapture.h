@@ -16,15 +16,16 @@
  */
 
  /**
-  * @brief 捕获指定窗口的内容
-  * @param windowName 窗口名称
-  * @param frame 输出的帧图像
-  * @return 是否成功捕获
-  *
-  * 该函数会先尝试通过窗口标题查找窗口句柄，
-  * 如果失败则尝试通过窗口类名查找。
-  */
-bool CaptureGameWindow(const std::string& windowName, cv::Mat& frame);
+ * @brief 捕获指定窗口的内容
+ * @param className 窗口类名 (可为空)
+ * @param windowName 窗口标题 (可为空)
+ * @param frame 输出的帧图像
+ * @return 是否成功捕获
+ *
+ * 根据窗口类名和/或窗口标题查找窗口并捕获其内容。
+ * 如果类名或标题为空字符串，则该参数在搜索时被忽略。
+ */
+bool CaptureGameWindow(const std::string& className, const std::string& windowName, cv::Mat& frame);
 
 /**
  * @brief 捕获指定区域的屏幕内容

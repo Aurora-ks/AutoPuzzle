@@ -5,19 +5,20 @@
 
 /**
  * @brief 捕获指定窗口的内容
- * @param windowName 窗口名称
+ * @param className 窗口类名
+ * @param windowName 窗口标题
  * @param frame 输出的帧图像
  * @return 是否成功捕获
  */
-bool CaptureGameWindow(const std::string& windowName, cv::Mat& frame) {
+bool CaptureGameWindow(const std::string& className, const std::string& windowName, cv::Mat& frame) {
     // 查找窗口句柄
-    HWND hwnd = FindWindow(nullptr, windowName.c_str());
-    if (hwnd == nullptr) {
-        hwnd = FindWindow(windowName.c_str(), nullptr);
-    }
+    LPCSTR pClassName = className.empty() ? nullptr : className.c_str();
+    LPCSTR pWindowName = windowName.empty() ? nullptr : windowName.c_str();
+
+    HWND hwnd = FindWindow(pClassName, pWindowName);
     
     if (hwnd == nullptr) {
-        std::cerr << "Error: Cannot find window: " << windowName << std::endl;
+        std::cerr << "Error: Cannot find window with class '" << className << "' and name '" << windowName << "'" << std::endl;
         return false;
     }
 
