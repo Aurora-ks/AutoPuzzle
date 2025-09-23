@@ -1,61 +1,45 @@
 #pragma once
 
+#include <windows.h>
+#include <mutex>
 #include <opencv2/opencv.hpp>
-#include <string>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
 
-/**
- * @brief 屏幕捕获模块
- * 负责捕获游戏窗口的内容并转换为OpenCV的Mat格式
- *
- * 该模块提供以下功能：
- * 1. 根据窗口名称捕获指定窗口
- * 2. 根据窗口句柄捕获窗口内容
- * 3. 捕获指定屏幕区域
- *
- * 所有捕获操作均返回OpenCV的Mat格式图像，便于后续图像处理
- */
+namespace psa {
+class ScreenCapture {
+public:
+    explicit ScreenCapture();
+    ~ScreenCapture();
 
- /**
- * @brief 捕获指定窗口的内容
- * @param className 窗口类名 (可为空)
- * @param windowName 窗口标题 (可为空)
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- *
- * 根据窗口类名和/或窗口标题查找窗口并捕获其内容。
- * 如果类名或标题为空字符串，则该参数在搜索时被忽略。
- */
-bool CaptureGameWindow(const std::string& className, const std::string& windowName, cv::Mat& frame);
+    void start();
+    void stop();
+    cv::Mat GetLatestFrame();
 
-/**
- * @brief 捕获指定区域的屏幕内容
- * @param x 截图区域左上角x坐标
- * @param y 截图区域左上角y坐标
- * @param width 截图区域宽度
- * @param height 截图区域高度
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- *
- * 直接通过指定坐标和尺寸捕获屏幕区域，
- * 适用于已知具体坐标的情况。
- */
-bool CaptureScreenRegion(int x, int y, int width, int height, cv::Mat& frame);
+private:
+    void OnFrameArrived(
+        const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
+        const winrt::Windows::Foundation::IInspectable& args);
+    
+    void Cleanup();
 
-/**
- * @brief 根据窗口句柄完整捕获窗口内容（包括子窗口）
- * @param hwnd 窗口句柄
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- *
- * 使用PrintWindow API捕获完整的窗口内容，包括所有子窗口和自定义绘制的内容。
- * 如果PrintWindow不可用或失败，将回退到BitBlt方法。
- */
-bool CaptureWindowComplete(void* hwnd, cv::Mat& frame);
+    static winrt::com_ptr<ID3D11Device> CreateD3DDevice();
+    static winrt::Windows::Graphics::Capture::GraphicsCaptureItem CreateCaptureItemForWindow(HWND hwnd);
 
-/**
- * @brief 获取屏幕尺寸
- * @param width 屏幕宽度（输出参数）
- * @param height 屏幕高度（输出参数）
- * @return 是否成功获取
- */
-bool GetScreenSize(int& width, int& height);
+    winrt::com_ptr<ID3D11Device> d3dDevice_;
+    winrt::com_ptr<ID3D11DeviceContext> d3dContext_;
+    winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice direct3DDevice_{nullptr};
+    winrt::Windows::Graphics::Capture::GraphicsCaptureItem captureItem_{nullptr};
+    winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool framePool_{nullptr};
+    winrt::Windows::Graphics::Capture::GraphicsCaptureSession session_{nullptr};
+    winrt::event_token frameArrivedToken_{};
+
+    cv::Mat frame_;
+    std::mutex frameMutex_;
+    bool frameReady_ = false;
+    bool isCapturing_ = false;
+};
+} // namespace psa

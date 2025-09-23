@@ -1,288 +1,176 @@
 #include "ScreenCapture.h"
-#include "utils.h"
-#include <windows.h>
 #include <iostream>
+#include <stdexcept>
+#include <windows.graphics.capture.interop.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
 
-/**
- * @brief 捕获指定窗口的内容
- * @param className 窗口类名
- * @param windowName 窗口标题
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- */
-bool CaptureGameWindow(const std::string& className, const std::string& windowName, cv::Mat& frame) {
-    // 查找窗口句柄
-    LPCSTR pClassName = className.empty() ? nullptr : className.c_str();
-    LPCSTR pWindowName = windowName.empty() ? nullptr : windowName.c_str();
+namespace psa {
 
-    HWND hwnd = FindWindow(pClassName, pWindowName);
-    
-    if (hwnd == nullptr) {
-        std::cerr << "Error: Cannot find window with class '" << className << "' and name '" << windowName << "'" << std::endl;
-        return false;
+ScreenCapture::ScreenCapture() {
+    HWND hwnd = FindWindowW(L"UnrealWindow", L"尘白禁区");
+    if (!hwnd) {
+        std::cerr << "Could not find the window." << std::endl;
+        throw std::runtime_error("Could not find the window.");
     }
+    try {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
-    return CaptureWindowComplete(hwnd, frame);
+        d3dDevice_ = CreateD3DDevice();
+        d3dDevice_->GetImmediateContext(d3dContext_.put());
+
+        winrt::com_ptr<IDXGIDevice> dxgiDevice = d3dDevice_.as<IDXGIDevice>();
+        winrt::com_ptr<::IInspectable> d3d_device_inspectable;
+        winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), d3d_device_inspectable.put()));
+        direct3DDevice_ = d3d_device_inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
+
+        captureItem_ = CreateCaptureItemForWindow(hwnd);
+        
+        framePool_ = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::Create(
+            direct3DDevice_,
+            winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            2,
+            captureItem_.Size());
+            
+        session_ = framePool_.CreateCaptureSession(captureItem_);
+        session_.IsCursorCaptureEnabled(false);
+        
+        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::OnFrameArrived});
+
+    } catch (const winrt::hresult_error& ex) {
+        std::wcerr << L"ScreenCapture initialization failed: " << ex.message().c_str() << std::endl;
+        Cleanup();
+        throw std::runtime_error("ScreenCapture initialization failed.");
+    }
 }
 
-/**
- * @brief 根据窗口句柄完整捕获窗口内容（包括子窗口）
- * @param hwnd 窗口句柄
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- * 
- * 使用PrintWindow API捕获完整的窗口内容，包括所有子窗口和自定义绘制的内容。
- * 如果PrintWindow不可用或失败，将回退到BitBlt方法。
- */
-bool CaptureWindowComplete(void* hwnd, cv::Mat& frame) {
-    HWND hWnd = reinterpret_cast<HWND>(hwnd);
-    
-    // 检查窗口句柄有效性
-    if (!IsWindow(hWnd)) {
-        std::cerr << "Error: Invalid window handle" << std::endl;
-        return false;
-    }
-    
-    // 获取窗口尺寸
-    RECT windowRect;
-    if (!GetWindowRect(hWnd, &windowRect)) {
-        std::cerr << "Error: Cannot get window rect" << std::endl;
-        return false;
-    }
-    
-    // 获取DPI缩放因子
-    UINT dpiX = GetDpiForWindow(hWnd);
-    UINT dpiY = GetDpiForWindow(hWnd);
-    float scale = static_cast<float>(dpiX) / 96.0f;
+ScreenCapture::~ScreenCapture() {
+    Cleanup();
+}
 
-    // 应用DPI缩放调整窗口尺寸
-    int width = static_cast<int>((windowRect.right - windowRect.left) * scale);
-    int height = static_cast<int>((windowRect.bottom - windowRect.top) * scale);
+void ScreenCapture::start() {
+    if (session_ && !isCapturing_) {
+        session_.StartCapture();
+        isCapturing_ = true;
+        std::cout << "Capture started." << std::endl;
+    }
+}
 
-    if (width <= 0 || height <= 0) {
-        std::cerr << "Error: Invalid window size after DPI scaling: " << width << "x" << height << std::endl;
-        return false;
-    }
-    
-    // 创建设备上下文
-    HDC hScreenDC = GetDC(hWnd);
-    if (hScreenDC == nullptr) {
-        std::cerr << "Error: Cannot get screen device context" << std::endl;
-        return false;
-    }
-    
-    HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
-    if (hMemoryDC == nullptr) {
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot create memory device context" << std::endl;
-        return false;
-    }
-    
-    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-    if (hBitmap == nullptr) {
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot create compatible bitmap" << std::endl;
-        return false;
-    }
-    
-    HGDIOBJ hOldBitmap = SelectObject(hMemoryDC, hBitmap);
-    if (hOldBitmap == nullptr || hOldBitmap == HGDI_ERROR) {
-        DeleteObject(hBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot select bitmap into memory DC" << std::endl;
-        return false;
-    }
-
-    // 使用PrintWindow捕获完整窗口（包括子窗口）
-    BOOL printResult = PrintWindow(hWnd, hMemoryDC, PW_CLIENTONLY);
-    
-    // 如果PrintWindow失败，回退到BitBlt方法
-    if (!printResult) {
-        std::cerr << "Error: PrintWindow failed, trying BitBlt" << std::endl;
-        HDC hWindowDC = GetWindowDC(hWnd);
-        if (hWindowDC != nullptr) {
-            BitBlt(hMemoryDC, 0, 0, width, height, hWindowDC, 0, 0, SRCCOPY);
-            ReleaseDC(hWnd, hWindowDC);
-        } else {
-            // 如果无法获取窗口DC，清理资源并返回错误
-            SelectObject(hMemoryDC, hOldBitmap);
-            DeleteObject(hBitmap);
-            DeleteDC(hMemoryDC);
-            ReleaseDC(nullptr, hScreenDC);
-            std::cerr << "Error: Cannot get window device context" << std::endl;
-            return false;
+void ScreenCapture::stop() {
+    if (isCapturing_) {
+        if (session_) {
+            session_.Close();
+            session_ = nullptr;
         }
+        isCapturing_ = false;
+        std::cout << "Capture stopped." << std::endl;
     }
-    
-    // 第一次查询：获取实际位深（biBitCount）等信息
-    BITMAPINFO bmi = {0};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biCompression = BI_RGB;
-    if (!GetDIBits(hScreenDC, hBitmap, 0, 0, nullptr, &bmi, DIB_RGB_COLORS)) {
-        SelectObject(hMemoryDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Query GetDIBits failed" << std::endl;
-        return false;
-    }
-
-    WORD bitCount = bmi.bmiHeader.biBitCount;
-    if (bitCount == 0) {
-        bitCount = 32; // 兜底为 32 位
-    }
-    int channels = bitCount == 1 ? 1 : static_cast<int>(bitCount) / 8; // 常见：8/24/32
-    if (channels != 1 && channels != 3 && channels != 4) {
-        channels = 4; // 非预期位深时兜底到 4 通道
-    }
-
-    // 设置为 top-down 并使用实际位深
-    ZeroMemory(&bmi, sizeof(BITMAPINFO));
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height; // top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = static_cast<WORD>(channels * 8);
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    cv::Mat rawImage;
-    if (channels == 4) {
-        rawImage.create(height, width, CV_8UC4);
-    } else if (channels == 3) {
-        rawImage.create(height, width, CV_8UC3);
-    } else {
-        rawImage.create(height, width, CV_8UC1);
-    }
-
-    if (!GetDIBits(hScreenDC, hBitmap, 0, height, rawImage.data, &bmi, DIB_RGB_COLORS)) {
-        SelectObject(hMemoryDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot get bitmap data via GetDIBits" << std::endl;
-        return false;
-    }
-
-    // 统一输出为 BGR
-    if (channels == 4) {
-        cv::cvtColor(rawImage, frame, cv::COLOR_BGRA2BGR);
-    } else if (channels == 3) {
-        frame = rawImage.clone();
-    } else {
-        cv::cvtColor(rawImage, frame, cv::COLOR_GRAY2BGR);
-    }
-    saveImage(frame, "screen_shot.png", "./screen");
-
-    // 清理资源
-    SelectObject(hMemoryDC, hOldBitmap);
-    DeleteObject(hBitmap);
-    DeleteDC(hMemoryDC);
-    ReleaseDC(nullptr, hScreenDC);
-    
-    return true;
 }
 
-/**
- * @brief 捕获指定区域的屏幕内容
- * @param x 截图区域左上角x坐标
- * @param y 截图区域左上角y坐标
- * @param width 截图区域宽度
- * @param height 截图区域高度
- * @param frame 输出的帧图像
- * @return 是否成功捕获
- */
-bool CaptureScreenRegion(int x, int y, int width, int height, cv::Mat& frame) {
-    // 参数验证
-    if (width <= 0 || height <= 0) {
-        std::cerr << "Error: Invalid capture region size: " << width << "x" << height << std::endl;
-        return false;
+void ScreenCapture::Cleanup() {
+    stop();
+    if (framePool_ && frameArrivedToken_.value != 0) {
+        framePool_.FrameArrived(frameArrivedToken_);
+        frameArrivedToken_ = {};
     }
     
-    // 获取屏幕设备上下文
-    HDC hScreenDC = GetDC(nullptr);
-    if (hScreenDC == nullptr) {
-        std::cerr << "Error: Cannot get screen device context" << std::endl;
-        return false;
+    session_ = nullptr;
+    
+    if (framePool_) {
+        framePool_.Close();
+        framePool_ = nullptr;
     }
-    
-    // 创建内存设备上下文
-    HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
-    if (hMemoryDC == nullptr) {
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot create memory device context" << std::endl;
-        return false;
-    }
-    
-    // 创建位图
-    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-    if (hBitmap == nullptr) {
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot create compatible bitmap" << std::endl;
-        return false;
-    }
-    
-    // 选择位图到内存DC
-    HGDIOBJ hOldBitmap = SelectObject(hMemoryDC, hBitmap);
-    
-    // 将屏幕内容复制到内存DC
-    if (!BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, x, y, SRCCOPY)) {
-        SelectObject(hMemoryDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot copy screen content to memory" << std::endl;
-        return false;
-    }
-    
-    // 获取位图信息
-    BITMAPINFO bmi = {0};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height; // 负值表示top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    
-    // 分配内存存储像素数据
-    cv::Mat rawImage(height, width, CV_8UC4);
-    if (!GetDIBits(hScreenDC, hBitmap, 0, height, rawImage.data, &bmi, DIB_RGB_COLORS)) {
-        SelectObject(hMemoryDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        DeleteDC(hMemoryDC);
-        ReleaseDC(nullptr, hScreenDC);
-        std::cerr << "Error: Cannot get bitmap data" << std::endl;
-        return false;
-    }
-    
-    // 转换为OpenCV格式 (BGRA to BGR)
-    cv::cvtColor(rawImage, frame, cv::COLOR_BGRA2BGR);
-    
-    // 清理资源
-    SelectObject(hMemoryDC, hOldBitmap);
-    DeleteObject(hBitmap);
-    DeleteDC(hMemoryDC);
-    ReleaseDC(nullptr, hScreenDC);
-    
-    return true;
+    captureItem_ = nullptr;
+    d3dContext_ = nullptr;
+    d3dDevice_ = nullptr;
+    direct3DDevice_ = nullptr;
+    std::cout << "ScreenCapture resources released." << std::endl;
 }
 
-/**
- * @brief 获取屏幕尺寸
- * @param width 屏幕宽度（输出参数）
- * @param height 屏幕高度（输出参数）
- * @return 是否成功获取
- */
-bool GetScreenSize(int& width, int& height) {
-    width = GetSystemMetrics(SM_CXSCREEN);
-    height = GetSystemMetrics(SM_CYSCREEN);
-    
-    if (width <= 0 || height <= 0) {
-        std::cerr << "Error: Cannot get screen size" << std::endl;
-        return false;
-    }
-    
-    return true;
+cv::Mat ScreenCapture::GetLatestFrame() {
+    cv::Mat frame;
+    std::lock_guard lock(frameMutex_);
+    if (!frameReady_) return frame;
+
+    cv::cvtColor(frame_, frame, cv::COLOR_BGRA2BGR);
+    frameReady_ = false;
+    return frame;
 }
+
+void ScreenCapture::OnFrameArrived(
+    const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
+    const winrt::Windows::Foundation::IInspectable& args) {
+
+    auto current_frame = sender.TryGetNextFrame();
+    if (!current_frame) return;
+
+    winrt::com_ptr<ID3D11Texture2D> sourceTexture;
+    auto access = current_frame.Surface().as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+    winrt::check_hresult(access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), sourceTexture.put_void()));
+
+    D3D11_TEXTURE2D_DESC desc;
+    sourceTexture->GetDesc(&desc);
+
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.MiscFlags = 0;
+
+    winrt::com_ptr<ID3D11Texture2D> stagingTexture;
+    winrt::check_hresult(d3dDevice_->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.put()));
+
+    d3dContext_->CopyResource(stagingTexture.get(), sourceTexture.get());
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    winrt::check_hresult(d3dContext_->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped));
+
+    {
+        std::lock_guard lock(frameMutex_);
+        if (frame_.empty() || frame_.cols != desc.Width || frame_.rows != desc.Height) {
+            frame_ = cv::Mat(desc.Height, desc.Width, CV_8UC4);
+        }
+        
+        uint8_t* pDst = frame_.data;
+        const uint8_t* pSrc = static_cast<const uint8_t*>(mapped.pData);
+        const UINT srcRowPitch = mapped.RowPitch;
+        const UINT dstRowPitch = frame_.step;
+
+        for (UINT y = 0; y < desc.Height; ++y) {
+            memcpy(pDst, pSrc, dstRowPitch);
+            pDst += dstRowPitch;
+            pSrc += srcRowPitch;
+        }
+        frameReady_ = true;
+    }
+
+    d3dContext_->Unmap(stagingTexture.get(), 0);
+}
+
+winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice() {
+    winrt::com_ptr<ID3D11Device> device;
+    UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#ifdef _DEBUG
+    creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+    D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+    };
+
+    winrt::check_hresult(D3D11CreateDevice(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, creationFlags, featureLevels,
+        ARRAYSIZE(featureLevels), D3D11_SDK_VERSION, device.put(), nullptr, nullptr));
+
+    return device;
+}
+
+winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::CreateCaptureItemForWindow(HWND hwnd) {
+    auto activation_factory = winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
+    auto interop = activation_factory.as<IGraphicsCaptureItemInterop>();
+    winrt::Windows::Graphics::Capture::GraphicsCaptureItem item = {nullptr};
+    winrt::check_hresult(interop->CreateForWindow(hwnd, winrt::guid_of<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>(), winrt::put_abi(item)));
+    return item;
+}
+
+} // namespace psa

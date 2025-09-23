@@ -1,7 +1,6 @@
-.vs/
-.lingma/
-.cursor/
+.idea/
 
-out/
+.env
 
-vcpkg_installed/
+cmake-build-debug/
+cmake-build-release/
