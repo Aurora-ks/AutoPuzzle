@@ -8,7 +8,7 @@ int main() {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     try {
-        psa::ScreenCapture screenCapture;
+        sba::ScreenCapture screenCapture;
         screenCapture.start();
 
         while (true) {

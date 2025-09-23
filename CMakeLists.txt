@@ -1,16 +1,26 @@
 cmake_minimum_required (VERSION 3.10)
 set(CMAKE_CXX_STANDARD 20)
 
-project ("PSA")
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "choose the build type" FORCE)
+endif ()
+
+project ("SnowbreakAssistant")
 include_directories("src")
 
 find_package(OpenCV REQUIRED)
 find_package(cppwinrt CONFIG REQUIRED)
 
-add_executable (PSA "main.cpp" "src/ScreenCapture.cpp")
+add_executable (${PROJECT_NAME} "main.cpp" "src/ScreenCapture.cpp")
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE _UNICODE UNICODE)
 
 if(MSVC)
-    target_compile_options(PSA PRIVATE "/utf-8" "/permissive-")
+    target_compile_options(${PROJECT_NAME} PRIVATE "/utf-8" "/permissive-")
 endif()
 
-target_link_libraries(PSA PRIVATE ${OpenCV_LIBS} Microsoft::CppWinRT windowsapp)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SBA_DEBUG)
+endif ()
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${OpenCV_LIBS} Microsoft::CppWinRT windowsapp)

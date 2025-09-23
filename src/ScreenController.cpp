@@ -1,6 +1,6 @@
 #include "ScreenController.h"
 
-namespace psa {
+namespace sba {
     void setWindowTo1920x1080(HWND handle) {
         if (handle) {
             // Define the desired window style for a standard windowed mode.

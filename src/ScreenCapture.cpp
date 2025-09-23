@@ -4,7 +4,7 @@
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
-namespace psa {
+namespace sba {
 
 ScreenCapture::ScreenCapture() {
     HWND hwnd = FindWindowW(L"UnrealWindow", L"尘白禁区");
@@ -16,7 +16,7 @@ ScreenCapture::ScreenCapture() {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
         // Create the Direct3D 11 device and get its immediate context.
-        d3dDevice_ = CreateD3DDevice();
+        d3dDevice_ = CreateD3DDevice_();
         d3dDevice_->GetImmediateContext(d3dContext_.put());
 
         // Get the DXGI device and create a WinRT IDirect3DDevice for interop.
@@ -26,7 +26,7 @@ ScreenCapture::ScreenCapture() {
         direct3DDevice_ = d3d_device_inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
 
         // Create a GraphicsCaptureItem for the target window.
-        captureItem_ = CreateCaptureItemForWindow(hwnd);
+        captureItem_ = CreateCaptureItemForWindow_(hwnd);
         
         // Create a frame pool to store captured frames.
         // The frames are stored in B8G8R8A8 format, which is compatible with OpenCV's BGRA format.
@@ -39,17 +39,17 @@ ScreenCapture::ScreenCapture() {
         session_ = framePool_.CreateCaptureSession(captureItem_);
         session_.IsCursorCaptureEnabled(false);
 
-        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::OnFrameArrived});
+        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::OnFrameArrived_});
 
     } catch (const winrt::hresult_error& ex) {
         std::wcerr << L"ScreenCapture initialization failed: " << ex.message().c_str() << std::endl;
-        Cleanup();
+        Cleanup_();
         throw std::runtime_error("ScreenCapture initialization failed.");
     }
 }
 
 ScreenCapture::~ScreenCapture() {
-    Cleanup();
+    Cleanup_();
 }
 
 void ScreenCapture::start() {
@@ -71,7 +71,7 @@ void ScreenCapture::stop() {
     }
 }
 
-void ScreenCapture::Cleanup() {
+void ScreenCapture::Cleanup_() {
     stop();
     if (framePool_ && frameArrivedToken_.value != 0) {
         framePool_.FrameArrived(frameArrivedToken_);
@@ -101,7 +101,7 @@ cv::Mat ScreenCapture::GetLatestFrame() {
     return frame;
 }
 
-void ScreenCapture::OnFrameArrived(
+void ScreenCapture::OnFrameArrived_(
     const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
     const winrt::Windows::Foundation::IInspectable& args) {
 
@@ -162,7 +162,7 @@ void ScreenCapture::OnFrameArrived(
     d3dContext_->Unmap(stagingTexture.get(), 0);
 }
 
-winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice() {
+winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice_() {
     winrt::com_ptr<ID3D11Device> device;
     // Enable BGRA support for compatibility with Windows.Graphics.Capture.
     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
@@ -194,7 +194,7 @@ winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice() {
     return device;
 }
 
-winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::CreateCaptureItemForWindow(HWND hwnd) {
+winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::CreateCaptureItemForWindow_(HWND hwnd) {
     // Get the activation factory for GraphicsCaptureItem.
     auto activation_factory = winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
     // Get the interop interface to create a capture item from an HWND.
@@ -205,4 +205,4 @@ winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::CreateCapt
     return item;
 }
 
-} // namespace psa
+} // namespace sba

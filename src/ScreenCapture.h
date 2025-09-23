@@ -9,7 +9,7 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 
-namespace psa {
+namespace sba {
 class ScreenCapture {
 public:
     explicit ScreenCapture();
@@ -20,14 +20,14 @@ public:
     cv::Mat GetLatestFrame();
 
 private:
-    void OnFrameArrived(
+    void OnFrameArrived_(
         const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
         const winrt::Windows::Foundation::IInspectable& args);
     
-    void Cleanup();
+    void Cleanup_();
 
-    static winrt::com_ptr<ID3D11Device> CreateD3DDevice();
-    static winrt::Windows::Graphics::Capture::GraphicsCaptureItem CreateCaptureItemForWindow(HWND hwnd);
+    static winrt::com_ptr<ID3D11Device> CreateD3DDevice_();
+    static winrt::Windows::Graphics::Capture::GraphicsCaptureItem CreateCaptureItemForWindow_(HWND hwnd);
 
     // Direct3D resources
     winrt::com_ptr<ID3D11Device> d3dDevice_; // The core Direct3D 11 device.
@@ -46,4 +46,4 @@ private:
     bool frameReady_ = false; // Flag indicating if a new frame is ready to be retrieved.
     bool isCapturing_ = false; // Flag indicating if the capture session is currently active.
 };
-} // namespace psa
+} // namespace sba

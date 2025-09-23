@@ -2,7 +2,7 @@
 
 #include <windows.h>
 
-namespace psa {
+namespace sba {
     /**
      * @brief Sets the window to windowed mode and adjusts its client area to 1920x1080.
      * @param handle The handle to the window.
