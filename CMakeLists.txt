@@ -10,10 +10,9 @@ include_directories("src")
 
 find_package(OpenCV REQUIRED)
 find_package(cppwinrt CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 
-add_executable (${PROJECT_NAME} "main.cpp" "src/ScreenCapture.cpp")
-
-target_compile_definitions(${PROJECT_NAME} PRIVATE _UNICODE UNICODE)
+add_executable (${PROJECT_NAME} "main.cpp" "src/ScreenCapture.cpp" "src/vision/base.cpp" "src/Input.cpp")
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/utf-8" "/permissive-")
@@ -23,4 +22,4 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(${PROJECT_NAME} PRIVATE SBA_DEBUG)
 endif ()
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${OpenCV_LIBS} Microsoft::CppWinRT windowsapp)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${OpenCV_LIBS} Microsoft::CppWinRT windowsapp yaml-cpp::yaml-cpp)

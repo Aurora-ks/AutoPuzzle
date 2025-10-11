@@ -6,7 +6,8 @@
         "tbb"
       ]
     },
-    {"name": "cppwinrt"}
+    {"name": "cppwinrt"},
+    {"name": "yaml-cpp"}
   ],
   "version": "1.0.0",
   "name": "psa"
