@@ -6,16 +6,58 @@
 
 namespace sba {
 
-ScreenCapture::ScreenCapture() {
-    HWND hwnd = FindWindowW(L"UnrealWindow", L"尘白禁区");
-    if (!hwnd) {
-        std::cerr << "Could not find the window." << std::endl;
-        throw std::runtime_error("Could not find the window.");
+ScreenCapture::ScreenCapture(HWND hwnd) {
+    if (!IsWindow(hwnd)) throw std::runtime_error("Invalid window handle.");
+    window_ = hwnd;
+}
+
+ScreenCapture::~ScreenCapture() {
+    stop();
+}
+
+// start: Launches the capture thread and waits for it to initialize.
+void ScreenCapture::start() {
+    if (bIsThreadRunning_) return;
+
+    bIsThreadRunning_ = true;
+    captureThread_ = std::thread(&ScreenCapture::CaptureThread_, this);
+
+    // Wait for the capture thread to finish initialization.
+    std::unique_lock lock(initMutex_);
+    initCv_.wait(lock, [this] { return bIsInitialized_; });
+}
+
+// stop: Signals the capture thread to terminate and waits for it to exit.
+void ScreenCapture::stop() {
+    if (!bIsThreadRunning_) return;
+
+    bIsThreadRunning_ = false;
+
+    // Post a WM_QUIT message to the thread's message queue to unblock GetMessage.
+    if (captureThread_.joinable()) {
+        PostThreadMessage(GetThreadId(captureThread_.native_handle()), WM_QUIT, 0, 0);
+        captureThread_.join();
     }
+    bIsInitialized_ = false;
+}
+
+cv::Mat ScreenCapture::WaitForNextFrame() {
+    std::unique_lock lock(frameMutex_);
+    frameCv_.wait(lock, [this] { return bFrameReady_; });
+    cv::Mat newFrame = frame_.clone();
+    bFrameReady_ = false;
+    lock.unlock();
+    cv::cvtColor(newFrame, newFrame, cv::COLOR_BGRA2BGR);
+    return newFrame;
+}
+
+// This is the entry point for the background capture thread.
+void ScreenCapture::CaptureThread_() {
     try {
+        // Initialize the COM apartment for this thread.
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
-        // Create the Direct3D 11 device and get its immediate context.
+        // --- All resource creation is now done on this thread ---
         d3dDevice_ = CreateD3DDevice_();
         d3dDevice_->GetImmediateContext(d3dContext_.put());
 
@@ -26,7 +68,7 @@ ScreenCapture::ScreenCapture() {
         direct3DDevice_ = d3d_device_inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
 
         // Create a GraphicsCaptureItem for the target window.
-        captureItem_ = CreateCaptureItemForWindow_(hwnd);
+        captureItem_ = CreateCaptureItemForWindow_(window_);
         
         // Create a frame pool to store captured frames.
         // The frames are stored in B8G8R8A8 format, which is compatible with OpenCV's BGRA format.
@@ -34,76 +76,46 @@ ScreenCapture::ScreenCapture() {
             direct3DDevice_,
             winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
             2, // Number of buffers in the frame pool.
-            captureItem_.Size()); // Size of the capture item.
+            captureItem_.Size());
 
         session_ = framePool_.CreateCaptureSession(captureItem_);
         session_.IsCursorCaptureEnabled(false);
-
         frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::OnFrameArrived_});
 
-    } catch (const winrt::hresult_error& ex) {
-        std::wcerr << L"ScreenCapture initialization failed: " << ex.message().c_str() << std::endl;
-        Cleanup_();
-        throw std::runtime_error("ScreenCapture initialization failed.");
-    }
-}
-
-ScreenCapture::~ScreenCapture() {
-    Cleanup_();
-}
-
-void ScreenCapture::start() {
-    if (session_ && !isCapturing_) {
-        session_.StartCapture();
-        isCapturing_ = true;
-        std::cout << "Capture started." << std::endl;
-    }
-}
-
-void ScreenCapture::stop() {
-    if (isCapturing_) {
-        if (session_) {
-            session_.Close();
-            session_ = nullptr;
+        // --- Initialization is complete ---
+        {
+            std::lock_guard lock(initMutex_);
+            bIsInitialized_ = true;
         }
-        isCapturing_ = false;
-        std::cout << "Capture stopped." << std::endl;
+        initCv_.notify_one(); // Signal the main thread that we are ready.
+        std::cout << "Capture thread initialized successfully." << std::endl;
+
+        session_.StartCapture();
+        std::cout << "Capture started." << std::endl;
+
+        // --- Run the message loop --- 
+        MSG msg;
+        while (GetMessage(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+    } catch (const winrt::hresult_error& ex) {
+        std::wcerr << L"Capture thread failed: " << ex.message() << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Capture thread failed: " << ex.what() << std::endl;
     }
-}
 
-void ScreenCapture::Cleanup_() {
-    stop();
-    if (framePool_ && frameArrivedToken_.value != 0) {
-        framePool_.FrameArrived(frameArrivedToken_);
-        frameArrivedToken_ = {};
-    }
-    
-    session_ = nullptr;
-
-    if (framePool_) {
-        framePool_.Close();
-        framePool_ = nullptr;
-    }
-    captureItem_ = nullptr;
-    d3dContext_ = nullptr;
-    d3dDevice_ = nullptr;
-    direct3DDevice_ = nullptr;
-    std::cout << "ScreenCapture resources released." << std::endl;
-}
-
-cv::Mat ScreenCapture::GetLatestFrame() {
-    cv::Mat frame;
-    std::lock_guard lock(frameMutex_);
-    if (!frameReady_) return frame;
-
-    cv::cvtColor(frame_, frame, cv::COLOR_BGRA2BGR);
-    frameReady_ = false;
-    return frame;
+    // --- Cleanup --- 
+    Cleanup_();
+    winrt::uninit_apartment();
+    std::cout << "Capture thread finished." << std::endl;
 }
 
 void ScreenCapture::OnFrameArrived_(
     const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
     const winrt::Windows::Foundation::IInspectable& args) {
+    if (!bIsThreadRunning_) return;
 
     // Get the latest frame from the pool.
     auto current_frame = sender.TryGetNextFrame();
@@ -134,32 +146,36 @@ void ScreenCapture::OnFrameArrived_(
     D3D11_MAPPED_SUBRESOURCE mapped;
     winrt::check_hresult(d3dContext_->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped));
 
+    cv::Mat frame(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch); // share with mapped.pData
+
     {
-        // Lock the mutex to safely write to the shared cv::Mat.
         std::lock_guard lock(frameMutex_);
-        // Re-allocate the Mat if the size has changed.
-        if (frame_.empty() || frame_.cols != desc.Width || frame_.rows != desc.Height) {
-            frame_ = cv::Mat(desc.Height, desc.Width, CV_8UC4);
-        }
-        
-        // Get pointers to the source and destination data.
-        uint8_t* pDst = frame_.data;
-        const uint8_t* pSrc = static_cast<const uint8_t*>(mapped.pData);
-        const UINT srcRowPitch = mapped.RowPitch; // Stride of the source texture.
-        const UINT dstRowPitch = frame_.step; // Stride of the destination cv::Mat.
-
-        // Copy the pixel data row by row.
-        // This is necessary if the row pitch (stride) of the texture and the cv::Mat are different.
-        for (UINT y = 0; y < desc.Height; ++y) {
-            memcpy(pDst, pSrc, dstRowPitch);
-            pDst += dstRowPitch;
-            pSrc += srcRowPitch;
-        }
-        frameReady_ = true;
+        frame_ = frame.clone();
+        bFrameReady_ = true;
     }
+    frameCv_.notify_one();
 
-    // Unmap the texture.
     d3dContext_->Unmap(stagingTexture.get(), 0);
+}
+
+void ScreenCapture::Cleanup_() {
+    if (session_) {
+        session_.Close();
+        session_ = nullptr;
+    }
+    if (framePool_) {
+        if (frameArrivedToken_.value != 0) {
+            framePool_.FrameArrived(frameArrivedToken_);
+            frameArrivedToken_ = {};
+        }
+        framePool_.Close();
+        framePool_ = nullptr;
+    }
+    captureItem_ = nullptr;
+    d3dContext_ = nullptr;
+    d3dDevice_ = nullptr;
+    direct3DDevice_ = nullptr;
+    std::cout << "ScreenCapture resources released." << std::endl;
 }
 
 winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice_() {
