@@ -1,0 +1,8 @@
+root_path: "/resources/template"
+default_threshold: 0.9
+templates:
+  main_mail_button:
+    path: "/gui_main09_icon001_06.png"
+
+  main_friend_button:
+    path: "/gui_main09_icon001_08.png"
