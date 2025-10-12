@@ -101,7 +101,7 @@ void ScreenCapture::CaptureThread_() {
         }
 
     } catch (const winrt::hresult_error& ex) {
-        std::wcerr << L"Capture thread failed: " << ex.message() << std::endl;
+        std::wcerr << L"Capture thread failed: " << ex.message().c_str() << std::endl;
     } catch (const std::exception& ex) {
         std::cerr << "Capture thread failed: " << ex.what() << std::endl;
     }
@@ -148,13 +148,33 @@ void ScreenCapture::OnFrameArrived_(
 
     cv::Mat frame(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch); // share with mapped.pData
 
-    {
-        std::lock_guard lock(frameMutex_);
-        frame_ = frame.clone();
-        bFrameReady_ = true;
-    }
-    frameCv_.notify_one();
+    RECT windowRect;
+    GetWindowRect(window_, &windowRect); // Get full window dimensions in screen coordinates
 
+    RECT clientRect;
+    GetClientRect(window_, &clientRect); // Get client area dimensions in client coordinates
+    // Convert clientRect to screen coordinates for direct comparison with windowRect
+    MapWindowPoints(window_, HWND_DESKTOP, (LPPOINT)&clientRect, 2);
+
+    // Now, calculate the offsets for cropping
+    // int cropOffsetX = clientRect.left - windowRect.left;
+    int cropOffsetX = 0;
+    int cropOffsetY = clientRect.top - windowRect.top;
+    int cropWidth = clientRect.right - clientRect.left;
+    int cropHeight = clientRect.bottom - clientRect.top;
+
+    cv::Rect roi(cropOffsetX, cropOffsetY, cropWidth, cropHeight);
+    if (roi.x >= 0 && roi.y >= 0 && roi.x + roi.width <= frame.cols && roi.y + roi.height <= frame.rows)
+    {
+        {
+            std::lock_guard lock(frameMutex_);
+            frame_ = frame(roi).clone();
+            bFrameReady_ = true;
+        }
+        frameCv_.notify_one();
+    }else{
+        throw std::runtime_error(std::format("Captrure ROI[{},{},{},{}] is out of bounds for frame[{}, {}]", roi.x, roi.y, roi.width, roi.height, frame.cols, frame.rows));
+    }
     d3dContext_->Unmap(stagingTexture.get(), 0);
 }
 
