@@ -1,10 +1,9 @@
 #include "base.h"
-#include <tuple>
 
 namespace sba {
 using enum MatchMode;
 
-std::tuple<cv::Rect, double> Match(const cv::Mat &frame, const cv::Mat &TemplateImg, const cv::Mat &mask, const MatchMode PreprocessMode) {
+Rect Match(const cv::Mat& frame, const cv::Mat& TemplateImg, const cv::Mat& mask, const MatchMode PreprocessMode) {
     cv::Mat FrameProc, TemplateProc;
 
     // Pre-process
@@ -32,15 +31,13 @@ std::tuple<cv::Rect, double> Match(const cv::Mat &frame, const cv::Mat &Template
     cv::minMaxLoc(result, nullptr, &MaxVal, nullptr, &MaxLoc);
 
     // For TM_CCOEFF_NORMED, the best match is at the max value location.
-    cv::Rect rect(MaxLoc, cv::Point(MaxLoc.x + TemplateImg.cols, MaxLoc.y + TemplateImg.rows));
-
-    return std::make_tuple(rect, MaxVal);
+    return Rect(MaxLoc.x, MaxLoc.y, TemplateImg.cols, TemplateImg.rows, MaxVal);
 }
 
-cv::Mat GetMask(const cv::Mat &img, const int threshold) {
+cv::Mat GetMask(const cv::Mat& img, const int threshold) {
     cv::Mat gray, result;
     cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
     cv::threshold(gray, result, threshold, 255, cv::THRESH_BINARY);
     return result;
 }
-} // namespace sba
+}  // namespace sba
