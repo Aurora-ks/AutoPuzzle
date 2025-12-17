@@ -1,14 +1,16 @@
 #include "ScreenCapture.h"
-#include <iostream>
-#include <stdexcept>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <iostream>
+#include <stdexcept>
 
 namespace sba {
 
 ScreenCapture::ScreenCapture(HWND hwnd) {
     if (!IsWindow(hwnd)) throw std::runtime_error("Invalid window handle.");
     window_ = hwnd;
+    // Set the process to be DPI-aware. This is crucial for correct scaling.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 }
 
 ScreenCapture::~ScreenCapture() {
@@ -20,7 +22,7 @@ void ScreenCapture::start() {
     if (bIsThreadRunning_) return;
 
     bIsThreadRunning_ = true;
-    captureThread_ = std::thread(&ScreenCapture::CaptureThread_, this);
+    captureThread_ = std::thread(&ScreenCapture::captureThread_, this);
 
     // Wait for the capture thread to finish initialization.
     std::unique_lock lock(initMutex_);
@@ -41,9 +43,11 @@ void ScreenCapture::stop() {
     bIsInitialized_ = false;
 }
 
-cv::Mat ScreenCapture::WaitForNextFrame() {
+cv::Mat ScreenCapture::waitForNextFrame(int timeoutMs) {
     std::unique_lock lock(frameMutex_);
-    frameCv_.wait(lock, [this] { return bFrameReady_; });
+    if (!frameCv_.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return bFrameReady_; })) {
+        return cv::Mat();  // 超时返回空Mat
+    }
     cv::Mat newFrame = frame_.clone();
     bFrameReady_ = false;
     lock.unlock();
@@ -52,13 +56,13 @@ cv::Mat ScreenCapture::WaitForNextFrame() {
 }
 
 // This is the entry point for the background capture thread.
-void ScreenCapture::CaptureThread_() {
+void ScreenCapture::captureThread() {
     try {
         // Initialize the COM apartment for this thread.
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
         // --- All resource creation is now done on this thread ---
-        d3dDevice_ = CreateD3DDevice_();
+        d3dDevice_ = createD3DDevice();
         d3dDevice_->GetImmediateContext(d3dContext_.put());
 
         // Get the DXGI device and create a WinRT IDirect3DDevice for interop.
@@ -68,32 +72,31 @@ void ScreenCapture::CaptureThread_() {
         direct3DDevice_ = d3d_device_inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
 
         // Create a GraphicsCaptureItem for the target window.
-        captureItem_ = CreateCaptureItemForWindow_(window_);
-        
+        captureItem_ = createCaptureItemForWindow(window_);
+
         // Create a frame pool to store captured frames.
         // The frames are stored in B8G8R8A8 format, which is compatible with OpenCV's BGRA format.
-        framePool_ = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::Create(
-            direct3DDevice_,
+        framePool_ = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::Create(direct3DDevice_,
             winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            2, // Number of buffers in the frame pool.
+            2,  // Number of buffers in the frame pool.
             captureItem_.Size());
 
         session_ = framePool_.CreateCaptureSession(captureItem_);
         session_.IsCursorCaptureEnabled(false);
-        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::OnFrameArrived_});
+        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::onFrameArrived});
 
         // --- Initialization is complete ---
         {
             std::lock_guard lock(initMutex_);
             bIsInitialized_ = true;
         }
-        initCv_.notify_one(); // Signal the main thread that we are ready.
+        initCv_.notify_one();  // Signal the main thread that we are ready.
         std::cout << "Capture thread initialized successfully." << std::endl;
 
         session_.StartCapture();
         std::cout << "Capture started." << std::endl;
 
-        // --- Run the message loop --- 
+        // --- Run the message loop ---
         MSG msg;
         while (GetMessage(&msg, NULL, 0, 0)) {
             TranslateMessage(&msg);
@@ -106,15 +109,14 @@ void ScreenCapture::CaptureThread_() {
         std::cerr << "Capture thread failed: " << ex.what() << std::endl;
     }
 
-    // --- Cleanup --- 
-    Cleanup_();
+    // --- Cleanup ---
+    cleanup();
     winrt::uninit_apartment();
     std::cout << "Capture thread finished." << std::endl;
 }
 
-void ScreenCapture::OnFrameArrived_(
-    const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender,
-    const winrt::Windows::Foundation::IInspectable& args) {
+void ScreenCapture::onFrameArrived(
+    const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender, const winrt::Windows::Foundation::IInspectable& args) {
     if (!bIsThreadRunning_) return;
 
     // Get the latest frame from the pool.
@@ -146,15 +148,15 @@ void ScreenCapture::OnFrameArrived_(
     D3D11_MAPPED_SUBRESOURCE mapped;
     winrt::check_hresult(d3dContext_->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped));
 
-    cv::Mat frame(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch); // share with mapped.pData
+    cv::Mat frame(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);  // share with mapped.pData
 
     RECT windowRect;
-    GetWindowRect(window_, &windowRect); // Get full window dimensions in screen coordinates
+    GetWindowRect(window_, &windowRect);  // Get full window dimensions in screen coordinates
 
     RECT clientRect;
-    GetClientRect(window_, &clientRect); // Get client area dimensions in client coordinates
+    GetClientRect(window_, &clientRect);  // Get client area dimensions in client coordinates
     // Convert clientRect to screen coordinates for direct comparison with windowRect
-    MapWindowPoints(window_, HWND_DESKTOP, (LPPOINT)&clientRect, 2);
+    MapWindowPoints(window_, HWND_DESKTOP, (LPPOINT) &clientRect, 2);
 
     // Now, calculate the offsets for cropping
     // int cropOffsetX = clientRect.left - windowRect.left;
@@ -164,21 +166,21 @@ void ScreenCapture::OnFrameArrived_(
     int cropHeight = clientRect.bottom - clientRect.top;
 
     cv::Rect roi(cropOffsetX, cropOffsetY, cropWidth, cropHeight);
-    if (roi.x >= 0 && roi.y >= 0 && roi.x + roi.width <= frame.cols && roi.y + roi.height <= frame.rows)
-    {
+    if (roi.x >= 0 && roi.y >= 0 && roi.x + roi.width <= frame.cols && roi.y + roi.height <= frame.rows) {
         {
             std::lock_guard lock(frameMutex_);
             frame_ = frame(roi).clone();
             bFrameReady_ = true;
         }
         frameCv_.notify_one();
-    }else{
-        throw std::runtime_error(std::format("Captrure ROI[{},{},{},{}] is out of bounds for frame[{}, {}]", roi.x, roi.y, roi.width, roi.height, frame.cols, frame.rows));
+    } else {
+        throw std::runtime_error(
+            std::format("Captrure ROI[{},{},{},{}] is out of bounds for frame[{}, {}]", roi.x, roi.y, roi.width, roi.height, frame.cols, frame.rows));
     }
     d3dContext_->Unmap(stagingTexture.get(), 0);
 }
 
-void ScreenCapture::Cleanup_() {
+void ScreenCapture::cleanup() {
     if (session_) {
         session_.Close();
         session_ = nullptr;
@@ -198,7 +200,7 @@ void ScreenCapture::Cleanup_() {
     std::cout << "ScreenCapture resources released." << std::endl;
 }
 
-winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice_() {
+winrt::com_ptr<ID3D11Device> ScreenCapture::createD3DDevice() {
     winrt::com_ptr<ID3D11Device> device;
     // Enable BGRA support for compatibility with Windows.Graphics.Capture.
     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
@@ -214,31 +216,31 @@ winrt::com_ptr<ID3D11Device> ScreenCapture::CreateD3DDevice_() {
     };
 
     // Create the D3D11 device.
-    winrt::check_hresult(D3D11CreateDevice(
-        nullptr, // Use default adapter.
-        D3D_DRIVER_TYPE_HARDWARE, // Use hardware acceleration.
-        nullptr, // No software rasterizer.
-        creationFlags, // Device creation flags.
-        featureLevels, // Array of feature levels.
-        ARRAYSIZE(featureLevels), // Size of the feature levels array.
-        D3D11_SDK_VERSION, // SDK version.
-        device.put(), // Pointer to receive the device.
-        nullptr, // Pointer to receive the feature level.
-        nullptr // Pointer to receive the device context.
-    ));
+    winrt::check_hresult(D3D11CreateDevice(nullptr,  // Use default adapter.
+        D3D_DRIVER_TYPE_HARDWARE,  // Use hardware acceleration.
+        nullptr,  // No software rasterizer.
+        creationFlags,  // Device creation flags.
+        featureLevels,  // Array of feature levels.
+        ARRAYSIZE(featureLevels),  // Size of the feature levels array.
+        D3D11_SDK_VERSION,  // SDK version.
+        device.put(),  // Pointer to receive the device.
+        nullptr,  // Pointer to receive the feature level.
+        nullptr  // Pointer to receive the device context.
+        ));
 
     return device;
 }
 
-winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::CreateCaptureItemForWindow_(HWND hwnd) {
+winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::createCaptureItemForWindow(HWND hwnd) {
     // Get the activation factory for GraphicsCaptureItem.
     auto activation_factory = winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
     // Get the interop interface to create a capture item from an HWND.
     auto interop = activation_factory.as<IGraphicsCaptureItemInterop>();
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item = {nullptr};
     // Create the capture item for the specified window.
-    winrt::check_hresult(interop->CreateForWindow(hwnd, winrt::guid_of<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>(), winrt::put_abi(item)));
+    winrt::check_hresult(
+        interop->CreateForWindow(hwnd, winrt::guid_of<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>(), winrt::put_abi(item)));
     return item;
 }
 
-} // namespace sba
+}  // namespace sba
