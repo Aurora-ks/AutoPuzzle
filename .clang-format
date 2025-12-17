@@ -1,0 +1,177 @@
+Language: Cpp
+
+# -----------------------------------------------------
+# 基础风格
+# -----------------------------------------------------
+
+# 基于 Google 官方 C++ 代码风格
+BasedOnStyle: Google
+
+# Google 规范：缩进 2 个空格
+IndentWidth: 4
+
+# Tab 等价空格数
+TabWidth: 4
+
+# 禁止使用 Tab，只用空格
+UseTab: Never
+
+# 换行后继续缩进的宽度
+ContinuationIndentWidth: 4
+
+
+# -----------------------------------------------------
+# 行宽与换行
+# -----------------------------------------------------
+
+# 每行最多字符
+ColumnLimit: 150
+
+# 允许非常短的函数写成一行（如空函数、简单 getter）
+AllowShortFunctionsOnASingleLine: InlineOnly
+
+# 允许短 if 语句写成一行
+AllowShortIfStatementsOnASingleLine: WithoutElse
+
+# 允许短循环写成一行
+AllowShortLoopsOnASingleLine: true
+
+# 允许短 case 写成一行
+AllowShortCaseLabelsOnASingleLine: true
+
+
+# -----------------------------------------------------
+# 大括号风格
+# -----------------------------------------------------
+
+# 使用 K&R 风格（左大括号不换行）
+# if (...) {
+# }
+BreakBeforeBraces: Attach
+
+BraceWrapping:
+  AfterClass: false
+  AfterFunction: false
+  AfterControlStatement: Never
+  AfterNamespace: false
+
+
+# -----------------------------------------------------
+# 指针 & 引用
+# -----------------------------------------------------
+
+# 指针/引用符号靠类型
+# int* p;
+PointerAlignment: Left
+
+# 不自动从上下文推导指针对齐
+DerivePointerAlignment: false
+
+
+# -----------------------------------------------------
+# 空格规则
+# -----------------------------------------------------
+
+# C 风格类型转换后加空格
+# (int) x
+SpaceAfterCStyleCast: true
+
+# 控制语句关键字后加空格
+# if (x), for (i)
+SpaceBeforeParens: ControlStatements
+
+# 圆括号内部不留空格
+SpacesInParentheses: false
+
+# 方括号内部不留空格
+SpacesInSquareBrackets: false
+
+# 花括号内部不留空格
+SpacesInContainerLiterals: false
+
+# 模板参数 <> 内不留空格
+SpacesInAngles: Never
+
+
+# -----------------------------------------------------
+# 对齐规则
+# -----------------------------------------------------
+
+# 不对齐连续赋值
+AlignConsecutiveAssignments: false
+
+# 不对齐连续声明
+AlignConsecutiveDeclarations: false
+
+# 不对齐宏
+AlignConsecutiveMacros: false
+
+# 对齐二元运算符
+AlignOperands: Align
+
+# 不刻意对齐尾部注释
+AlignTrailingComments: false
+
+# 参数对齐方式
+AlignAfterOpenBracket: DontAlign
+
+# -----------------------------------------------------
+# 函数参数 / 调用格式
+# -----------------------------------------------------
+
+# 不压缩参数，换行更清晰
+BinPackParameters: false
+BinPackArguments: false
+
+# 返回类型和函数名一般在同一行
+AlwaysBreakAfterReturnType: None
+
+
+# -----------------------------------------------------
+# include 排序（非常重要）
+# -----------------------------------------------------
+
+# 自动排序 include
+SortIncludes: CaseSensitive
+IncludeBlocks: Merge
+
+# include 分组规则
+IncludeCategories:
+  - Regex: '^<[^/]+\.h>$'
+    Priority: 1
+  - Regex: '^<.*>$'
+    Priority: 2
+  - Regex: '^".*"'
+    Priority: 3
+
+
+# -----------------------------------------------------
+# namespace
+# -----------------------------------------------------
+
+# namespace 内部不额外缩进
+NamespaceIndentation: None
+
+# 不压缩 namespace
+CompactNamespaces: false
+
+
+# -----------------------------------------------------
+# 注释
+# -----------------------------------------------------
+
+# 自动重排注释
+ReflowComments: true
+
+# -----------------------------------------------------
+# 空行控制
+# -----------------------------------------------------
+
+# 块开始处不保留多余空行
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# 最多保留 1 个连续空行
+MaxEmptyLinesToKeep: 1
+
+# 文件末尾自动加换行符
+InsertNewlineAtEOF: false
