@@ -1,67 +1,45 @@
 #pragma once
 
 #include <Windows.h>
-#include <random>
-#include <chrono>
-#include <thread>
+#include <string>
 
 namespace sba {
-enum class MouseButton {
-    Left,
-    Right,
-    Middle
-};
+enum class MouseButton { Left, Right, Middle };
 
 class Input {
-public:
+   public:
     explicit Input(HWND hwnd);
 
-    void MouseMoveH(int x, int y);
-    void MouseMoveM(int x, int y);
+    inline static constexpr const char* kKeyEsc = "esc";
+    inline static constexpr const char* kKeySpace = "space";
+    inline static constexpr const char* kKeyTab = "tab";
+    inline static constexpr const char* kKeyEnter = "enter";
+    inline static constexpr const char* kKeyShift = "shift";
+    inline static constexpr const char* kKeyCtrl = "ctrl";
+    inline static constexpr const char* kKeyAlt = "alt";
+    inline static constexpr const char* kKeyUp = "up";
+    inline static constexpr const char* kKeyDown = "down";
+    inline static constexpr const char* kKeyLeft = "left";
+    inline static constexpr const char* kKeyRight = "right";
+    inline static constexpr const char* kKeyDel = "del";
+    inline static constexpr const char* kKeyBackspace = "backspace";
 
-    void MouseDownM(int x, int y);
-    void MouseUpM(int x, int y);
-    void MouseUpH(int x, int y);
-    void MouseDownH(int x, int y);
+    void activate();
+    void mouseMove(int x, int y);
+    void mouseDown(int x, int y, MouseButton button);
+    void mouseUp(int x, int y, MouseButton button);
+    void mouseClick(int x, int y, MouseButton button = MouseButton::Left, int clickDurationMs = 200);
 
-    void MouseClickM(int x, int y, int clickDurationMs = 50);
-    void MouseClickH(int x, int y, int clickDurationMs = 50);
+    void keyDown(WORD vkCode);
+    void keyUp(WORD vkCode);
+    void keyPress(const std::string& key, int pressDurationMs = 200);
 
-    // --- 键盘操作 ---
-
-    /**
-     * @brief 模拟在后台窗口按下指定按键
-     * @param vkCode 虚拟键码 (e.g., 'W', VK_SPACE)
-     */
-    void KeyDownM(WORD vkCode);
-
-    /**
-     * @brief 模拟在后台窗口释放指定按键
-     * @param vkCode 虚拟键码 (e.g., 'W', VK_SPACE)
-     */
-    void KeyUpM(WORD vkCode);
-
-    /**
-     * @brief 模拟在后台窗口的一次完整按键（单击）
-     * @param vkCode 虚拟键码
-     * @param pressDurationMs 按下和抬起之间的模拟延迟（毫秒）
-     */
-    void KeyDownH(WORD vkCode);
-    void KeyUpH(WORD vkCode);
-    void KeyPressM(WORD vkCode, int pressDurationMs = 50);
-    void KeyPressH(WORD vkCode, int pressDurationMs = 50);
-
-private:
-    /**
-     * @brief 为键盘消息构造 lParam 参数
-     * @param vkCode 虚拟键码
-     * @param isKeyUp 标志是按下(false)还是抬起(true)
-     * @return 构造好的 lParam 值
-     */
-    static LPARAM BuildKeyLParam_(WORD vkCode, bool isKeyUp);
-    inline void CheckWindow_() const;
-    void ConvertCoordinate(int x, int y, LONG &outAbsX, LONG &outAbsY); // 将client坐标转换到绝对坐标
+   private:
+    static LPARAM buildKeyLParam(WORD vkCode, bool isKeyUp);
+    void convertCoordinate(int x, int y, LONG& outAbsX, LONG& outAbsY);  // 将client坐标转换到绝对坐标
+    static bool hasMouseMoved(int thresholdPixels = 3, int durationMs = 100);  // 判断在一段时间内鼠标是否移动超过阈值
+    static WORD parseKey(const std::string& key);  // 将字符串转换为虚拟键码
 
     HWND window_;
 };
-}// namespace sba
+}  // namespace sba
