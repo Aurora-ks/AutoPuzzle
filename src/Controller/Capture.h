@@ -13,10 +13,10 @@
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 
 namespace sba {
-class ScreenCapture {
+class Capture {
    public:
-    explicit ScreenCapture(HWND hwnd);
-    ~ScreenCapture();
+    explicit Capture(HWND hwnd);
+    ~Capture();
 
     void start();
     void stop();

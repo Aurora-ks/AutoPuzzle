@@ -1,4 +1,4 @@
-#include "ScreenCapture.h"
+#include "Capture.h"
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <iostream>
@@ -6,23 +6,23 @@
 
 namespace sba {
 
-ScreenCapture::ScreenCapture(HWND hwnd) {
+Capture::Capture(HWND hwnd) {
     if (!IsWindow(hwnd)) throw std::runtime_error("Invalid window handle.");
     window_ = hwnd;
     // Set the process to be DPI-aware. This is crucial for correct scaling.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 }
 
-ScreenCapture::~ScreenCapture() {
+Capture::~Capture() {
     stop();
 }
 
 // start: Launches the capture thread and waits for it to initialize.
-void ScreenCapture::start() {
+void Capture::start() {
     if (bIsThreadRunning_) return;
 
     bIsThreadRunning_ = true;
-    captureThread_ = std::thread(&ScreenCapture::captureThread_, this);
+    captureThread_ = std::thread(&Capture::captureThread_, this);
 
     // Wait for the capture thread to finish initialization.
     std::unique_lock lock(initMutex_);
@@ -30,7 +30,7 @@ void ScreenCapture::start() {
 }
 
 // stop: Signals the capture thread to terminate and waits for it to exit.
-void ScreenCapture::stop() {
+void Capture::stop() {
     if (!bIsThreadRunning_) return;
 
     bIsThreadRunning_ = false;
@@ -43,7 +43,7 @@ void ScreenCapture::stop() {
     bIsInitialized_ = false;
 }
 
-cv::Mat ScreenCapture::waitForNextFrame(int timeoutMs) {
+cv::Mat Capture::waitForNextFrame(int timeoutMs) {
     std::unique_lock lock(frameMutex_);
     if (!frameCv_.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return bFrameReady_; })) {
         return cv::Mat();  // 超时返回空Mat
@@ -56,7 +56,7 @@ cv::Mat ScreenCapture::waitForNextFrame(int timeoutMs) {
 }
 
 // This is the entry point for the background capture thread.
-void ScreenCapture::captureThread() {
+void Capture::captureThread() {
     try {
         // Initialize the COM apartment for this thread.
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
@@ -83,7 +83,7 @@ void ScreenCapture::captureThread() {
 
         session_ = framePool_.CreateCaptureSession(captureItem_);
         session_.IsCursorCaptureEnabled(false);
-        frameArrivedToken_ = framePool_.FrameArrived({this, &ScreenCapture::onFrameArrived});
+        frameArrivedToken_ = framePool_.FrameArrived({this, &Capture::onFrameArrived});
 
         // --- Initialization is complete ---
         {
@@ -115,7 +115,7 @@ void ScreenCapture::captureThread() {
     std::cout << "Capture thread finished." << std::endl;
 }
 
-void ScreenCapture::onFrameArrived(
+void Capture::onFrameArrived(
     const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& sender, const winrt::Windows::Foundation::IInspectable& args) {
     if (!bIsThreadRunning_) return;
 
@@ -180,7 +180,7 @@ void ScreenCapture::onFrameArrived(
     d3dContext_->Unmap(stagingTexture.get(), 0);
 }
 
-void ScreenCapture::cleanup() {
+void Capture::cleanup() {
     if (session_) {
         session_.Close();
         session_ = nullptr;
@@ -197,10 +197,10 @@ void ScreenCapture::cleanup() {
     d3dContext_ = nullptr;
     d3dDevice_ = nullptr;
     direct3DDevice_ = nullptr;
-    std::cout << "ScreenCapture resources released." << std::endl;
+    std::cout << "Capture resources released." << std::endl;
 }
 
-winrt::com_ptr<ID3D11Device> ScreenCapture::createD3DDevice() {
+winrt::com_ptr<ID3D11Device> Capture::createD3DDevice() {
     winrt::com_ptr<ID3D11Device> device;
     // Enable BGRA support for compatibility with Windows.Graphics.Capture.
     UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
@@ -231,7 +231,7 @@ winrt::com_ptr<ID3D11Device> ScreenCapture::createD3DDevice() {
     return device;
 }
 
-winrt::Windows::Graphics::Capture::GraphicsCaptureItem ScreenCapture::createCaptureItemForWindow(HWND hwnd) {
+winrt::Windows::Graphics::Capture::GraphicsCaptureItem Capture::createCaptureItemForWindow(HWND hwnd) {
     // Get the activation factory for GraphicsCaptureItem.
     auto activation_factory = winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
     // Get the interop interface to create a capture item from an HWND.
