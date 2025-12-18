@@ -11,7 +11,7 @@ find_package(OpenCV REQUIRED)
 find_package(cppwinrt CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 
-add_executable (${PROJECT_NAME} "main.cpp" "src/ScreenCapture.cpp" "src/vision/base.cpp" "src/Input.cpp")
+add_executable (${PROJECT_NAME} "main.cpp" "src/vision/Base.cpp" "src/Controller/Capture.cpp" "src/Controller/Input.cpp")
 
 target_include_directories(${PROJECT_NAME} PRIVATE "src")
 
