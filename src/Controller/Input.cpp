@@ -1,11 +1,8 @@
 #include "Input.h"
-#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
-#include <stdexcept>
-#include <string>
 #include <thread>
-#include <unordered_map>
 
 namespace sba {
 Input::Input(HWND hwnd) {
@@ -70,56 +67,6 @@ bool Input::hasMouseMoved(int thresholdPixels, int durationMs) {
 
     // 当任一方向上的位移绝对值大于等于阈值时，认为“有移动”
     return (std::abs(dx) >= thresholdPixels) || (std::abs(dy) >= thresholdPixels);
-}
-
-WORD Input::parseKey(const std::string& key) {
-    std::string lower = key;
-    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    static const std::unordered_map<std::string, WORD> kSpecialKeys{
-            {"esc", VK_ESCAPE},
-            {"space", VK_SPACE},
-            {"tab", VK_TAB},
-            {"enter", VK_RETURN},
-            {"shift", VK_SHIFT},
-            {"ctrl", VK_CONTROL},
-            {"alt", VK_MENU},
-            {"up", VK_UP},
-            {"down", VK_DOWN},
-            {"left", VK_LEFT},
-            {"right", VK_RIGHT},
-            {"del", VK_DELETE},
-            {"backspace", VK_BACK},
-    };
-
-    // 单字符 a-z 或 0-9
-    if (lower.size() == 1) {
-        char c = lower[0];
-        if (c >= 'a' && c <= 'z') {
-            return static_cast<WORD>('A' + (c - 'a'));
-        }
-        if (c >= '0' && c <= '9') {
-            return static_cast<WORD>('0' + (c - '0'));
-        }
-    }
-
-    auto it = kSpecialKeys.find(lower);
-    if (it != kSpecialKeys.end()) return it->second;
-
-    // F1-F12
-    if (lower.size() >= 2 && lower[0] == 'f') {
-        int fn = 0;
-        try {
-            fn = std::stoi(lower.substr(1));
-        } catch (...) {
-            throw std::invalid_argument("invalid function key: " + key);
-        }
-        if (fn >= 1 && fn <= 12) {
-            return static_cast<WORD>(VK_F1 + (fn - 1));
-        }
-    }
-
-    throw std::invalid_argument("unsupported key: " + key);
 }
 
 void Input::activate() {
@@ -200,8 +147,25 @@ void Input::keyUp(WORD vkCode) {
     PostMessage(window_, WM_KEYUP, vkCode, buildKeyLParam(vkCode, true));
 }
 
-void Input::keyPress(const std::string& key, int pressDurationMs) {
-    WORD vkCode = parseKey(key);
+void Input::keyPress(Key key, int pressDurationMs) {
+    WORD vkCode = static_cast<WORD>(key);
+    keyDown(vkCode);
+    if (pressDurationMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(pressDurationMs));
+    keyUp(vkCode);
+}
+
+void Input::keyPress(char key, int pressDurationMs) {
+    WORD vkCode = 0;
+    char c = static_cast<char>(std::tolower(static_cast<unsigned char>(key)));
+
+    if (c >= 'a' && c <= 'z') {
+        vkCode = static_cast<WORD>('A' + (c - 'a'));
+    } else if (c >= '0' && c <= '9') {
+        vkCode = static_cast<WORD>(c);
+    } else {
+        return;  // 不支持的字符，直接返回
+    }
+
     keyDown(vkCode);
     if (pressDurationMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(pressDurationMs));
     keyUp(vkCode);
