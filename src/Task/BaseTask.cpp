@@ -1,6 +1,9 @@
 #include "BaseTask.h"
 #include <chrono>
 #include <thread>
+#include "Assistant.h"
+#include "Controller/Capture.h"
+#include "Controller/Input.h"
 
 namespace sba {
 
@@ -8,6 +11,11 @@ std::atomic<int> BaseTask::idCounter_{1};
 
 int BaseTask::generateUniqueID() noexcept {
     return idCounter_.fetch_add(1, std::memory_order_relaxed);
+}
+
+BaseTask::BaseTask(const std::string& name, Assistant* assistant, int maxRetries, int retryIntervalMs)
+    : name_(name), assistant_(assistant), maxRetries_(maxRetries), retryIntervalMs_(retryIntervalMs) {
+    id_ = generateUniqueID();
 }
 
 bool BaseTask::run() {
@@ -36,6 +44,14 @@ bool BaseTask::run() {
         status_ = TaskStatus::Failed;
     }
     return success;
+}
+
+std::shared_ptr<Capture> BaseTask::capture() const noexcept {
+    return assistant_ == nullptr ? nullptr : assistant_->capture();
+}
+
+std::shared_ptr<Input> BaseTask::input() const noexcept {
+    return assistant_ == nullptr ? nullptr : assistant_->input();
 }
 
 }  // namespace sba

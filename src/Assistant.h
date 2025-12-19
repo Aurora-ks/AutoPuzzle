@@ -20,6 +20,9 @@ class Assistant {
     void stop();
     void addTask(std::shared_ptr<BaseTask> task);
 
+    std::shared_ptr<Capture> capture() const noexcept { return capture_; }
+    std::shared_ptr<Input> input() const noexcept { return input_; }
+
    private:
     void taskLoop();
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <string>
 
 namespace sba {
@@ -13,24 +14,28 @@ enum class TaskStatus {
     Cancelled  // 已取消
 };
 
+class Capture;
+class Input;
+class Assistant;
+
 class BaseTask {
    public:
-    BaseTask(const std::string& name, int maxRetries = 3, int retryIntervalMs = 1000)
-        : name_(name), maxRetries_(maxRetries), retryIntervalMs_(retryIntervalMs) {
-        id_ = generateUniqueID();
-    }
+    BaseTask(const std::string& name, Assistant* assistant, int maxRetries = 3, int retryIntervalMs = 1000);
     virtual ~BaseTask() noexcept = default;
 
     virtual bool run();
 
-    inline TaskStatus status() const noexcept { return status_; }
-    inline const std::string& name() const noexcept { return name_; }
-    inline int taskID() const noexcept { return id_; }
+    TaskStatus status() const noexcept { return status_; }
+    const std::string& name() const noexcept { return name_; }
+    int taskID() const noexcept { return id_; }
+    std::shared_ptr<Capture> capture() const noexcept;
+    std::shared_ptr<Input> input() const noexcept;
 
    protected:
     virtual bool execute() = 0;
     TaskStatus status_{TaskStatus::Pending};
     std::string name_;
+    Assistant* assistant_{nullptr};
     int id_{0};
     int maxRetries_{3};
     int retryIntervalMs_{1000};
